@@ -1,328 +1,189 @@
-# Clash Royale Clan Manager
-# computes promotion/demotion/kick/warning lists, average war rank, and weekly war champ according to clan wars II statistics
-# uses data from Supercell's Clash Royale API
+#!/usr/bin/env python3
+"""Clash Royale Clan Manager: fetch war history and evaluate configured rules.
 
+Requires rule_engine.py in the same directory and requests from requirements.txt.
+Usage: python ClashRoyaleClanManager.py [--cached]
+"""
+
+from __future__ import annotations
+
+import argparse
 import json
-import requests
 import statistics
-
+import sys
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote
 
-# Create logs directory if it does not exist
+import requests
+
+from rule_engine import RuleConfigurationError, evaluate_clan
+
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-# Load configuration
 CONFIG_FILE = BASE_DIR / "config.json"
+API_BASE_URL = "https://api.clashroyale.com/v1"
 
 
-def data_fetcher(clan_tag, token, category):
-    # fetches data from API for a given category
-    # categories: currentriverrace, riverracelog, warlog, members, members?limit=50, empty input for clan info etc
-    
-    myheaders = {} 
-    myheaders['Accept'] = 'application/json'
-    myheaders['authorization'] = 'Bearer '+token
+def load_config() -> tuple[str, str, dict[str, Any]]:
+    try:
+        with CONFIG_FILE.open("r", encoding="utf-8") as infile:
+            config = json.load(infile)
+    except FileNotFoundError:
+        raise SystemExit("Missing config.json. Copy config.example.json to config.json and edit it.")
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Cannot load config.json: {exc}")
 
-    clan_tag_for_url = '%23' + clan_tag[1:]  # replace # with %23 for the http get request        
-    url = "https://api.clashroyale.com/v1/clans/" + clan_tag_for_url + '/' + category
+    if not isinstance(config, dict):
+        raise SystemExit("config.json must contain a JSON object.")
+    clan_tag = config.get("clan_tag")
+    token = config.get("api_token")
+    if not isinstance(clan_tag, str) or not clan_tag.strip().startswith("#") or len(clan_tag.strip()) < 2:
+        raise SystemExit("config.json requires a valid clan_tag starting with #.")
+    if not isinstance(token, str) or not token.strip() or token == "YOUR_API_TOKEN":
+        raise SystemExit("config.json requires your Clash Royale api_token.")
+    rules = config.get("rules")
+    if not isinstance(rules, dict):
+        raise SystemExit("config.json requires a rules object.")
+    return clan_tag.strip(), token.strip(), rules
 
-    response = requests.request("GET", url, headers=myheaders)
 
-    return response.json()
+def fetch_data(clan_tag: str, token: str, endpoint: str) -> dict[str, Any]:
+    # Clash Royale clan tags must be percent-encoded in the URL (including '#').
+    url = f"{API_BASE_URL}/clans/{quote(clan_tag, safe='')}/{endpoint}"
+    try:
+        response = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Failed fetching {endpoint}: {exc}") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"API response for {endpoint} is not valid JSON") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        raise RuntimeError(f"Unexpected API response structure for {endpoint}")
+    return data
 
 
-
-def ClashRoyaleClanManager(clan_tag, token, data_fetched, rules):
-    """Evaluate clan war performance and recommend role changes."""
-
-    # Load previously fetched data or fetch fresh data.
-    if data_fetched:
-        with (LOG_DIR / "members.json").open(
-            "r", encoding="utf-8"
-        ) as infile:
-            members = json.load(infile)
-
-        with (LOG_DIR / "riverracelog.json").open(
-            "r", encoding="utf-8"
-        ) as infile:
-            riverracelog = json.load(infile)
-    else:
-        print("Fetching members data...")
-        members = data_fetcher(clan_tag, token, "members")
-
-        with (LOG_DIR / "members.json").open(
-            "w", encoding="utf-8"
-        ) as outfile:
-            json.dump(members, outfile)
-
-        print("Fetching riverracelog data...")
-        riverracelog = data_fetcher(
-            clan_tag, token, "riverracelog"
-        )
-
-        with (LOG_DIR / "riverracelog.json").open(
-            "w", encoding="utf-8"
-        ) as outfile:
-            json.dump(riverracelog, outfile)
-
-    # Initialize result lists.
-    promotion_list = []
-    demotion_list = []
-    kick_list = []
-    warning_list = []
-    week_champ = None
-
-    # Initialize clan history, indexed by player tag.
-    member_items = members.get("items", [])
-    clan_log = {"ranks": []}
-
-    for member in member_items:
-        clan_log[member["tag"]] = {
-            "name": member["name"],
-            "role": member["role"],
-            "fame": {}
-        }
-
-    # Order war history chronologically using integer tuples.
-    weeks = sorted(
-        riverracelog.get("items", []),
-        key=lambda week: (
-            int(week["seasonId"]),
-            int(week["sectionIndex"])
-        ),
-        reverse=True
-    )
-
-    # Build clan history, ignoring weeks without our clan.
-    valid_races = []
-
-    for war_week in weeks:
-        clan_data = next(
-            (
-                entry
-                for entry in war_week.get("standings", [])
-                if entry.get("clan", {}).get("tag") == clan_tag
-            ),
-            None
-        )
-
-        if clan_data is None:
-            continue
-
-        week_id = (
-            f"{war_week['seasonId']}:"
-            f"{war_week['sectionIndex']}"
-        )
-        valid_races.append(week_id)
-
-        if clan_data.get("rank") is not None:
-            clan_log["ranks"].append(clan_data["rank"])
-
-        for participant in clan_data["clan"].get(
-            "participants", []
-        ):
-            tag = participant["tag"]
-
-            if tag in clan_log:
-                clan_log[tag]["fame"][week_id] = (
-                    participant["fame"]
-                )
-
-    # Report average rank.
-    if clan_log["ranks"]:
-        print(
-            "Average war rank: "
-            f"{statistics.mean(clan_log['ranks']):.2f}"
-        )
-    else:
-        print("Average war rank: No data available.")
-
-    # Calculate weekly champion.
-    if valid_races:
-        last_race = valid_races[0]
-
-        week_fame = [
-            (player["name"], player["fame"][last_race])
-            for tag, player in clan_log.items()
-            if tag != "ranks"
-            and last_race in player["fame"]
-        ]
-
-        if week_fame:
-            max_score = max(score for _, score in week_fame)
-
-            champions = [
-                entry
-                for entry in week_fame
-                if entry[1] == max_score
-            ]
-
-            week_champ = (
-                champions[0]
-                if len(champions) == 1
-                else champions
-            )
+def load_data(clan_tag: str, token: str, cached: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    results = []
+    for endpoint, name in (("members", "members.json"), ("riverracelog", "riverracelog.json")):
+        path = LOG_DIR / name
+        if cached:
+            try:
+                with path.open("r", encoding="utf-8") as infile:
+                    data = json.load(infile)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(f"Cannot load cached {path}: {exc}") from exc
+            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                raise RuntimeError(f"Unexpected cached data structure in {path}")
         else:
-            print("No eligible players for weekly champion.")
-    else:
-        print("No valid clan war history available.")
+            print(f"Fetching {endpoint} data...")
+            data = fetch_data(clan_tag, token, endpoint)
+            with path.open("w", encoding="utf-8") as outfile:
+                json.dump(data, outfile, indent=2)
+        results.append(data)
+    return results[0], results[1]
 
-    # Evaluate configurable management rules.
-    if valid_races:
-        promotion_rules = rules["promotion"]
-        demotion_rules = rules["demotion"]
-        warning_rules = rules["warning"]
-        kick_rules = rules["kick"]
 
-        promotion_weeks = promotion_rules["consecutive_weeks"]
-        demotion_weeks = demotion_rules["consecutive_weeks"]
-        kick_weeks = kick_rules["consecutive_weeks"]
+def report(members: dict[str, Any], riverracelog: dict[str, Any], clan_tag: str,
+           rules: dict[str, Any]) -> None:
+    wars, evaluations = evaluate_clan(members, riverracelog, clan_tag, rules)
 
-        for tag, player in clan_log.items():
-            if tag == "ranks":
-                continue
-
-            name = player["name"]
-            role = player["role"]
-            fame = player["fame"]
-
-            # Warning: evaluate the most recent war.
-            if valid_races[0] in fame:
-                latest_score = fame[valid_races[0]]
-
-                if latest_score < warning_rules["below_fame"]:
-                    warning_list.append(
-                        (name, role, latest_score)
-                    )
-
-            # Promotion: all required weeks must be present.
-            if role == "member":
-                recent = valid_races[:promotion_weeks]
-
-                if (
-                    len(recent) == promotion_weeks
-                    and all(week in fame for week in recent)
-                    and all(
-                        fame[week] >= promotion_rules[
-                            "minimum_fame_per_week"
-                        ]
-                        for week in recent
-                    )
-                ):
-                    promotion_list.append(
-                        (name, role, *(fame[w] for w in recent))
-                    )
-
-            # Demotion: elders only.
-            if role == "elder":
-                recent = valid_races[:demotion_weeks]
-
-                if (
-                    len(recent) == demotion_weeks
-                    and all(week in fame for week in recent)
-                    and all(
-                        fame[week] < demotion_rules[
-                            "below_fame_per_week"
-                        ]
-                        for week in recent
-                    )
-                ):
-                    demotion_list.append(
-                        (name, role, *(fame[w] for w in recent))
-                    )
-
-            # Kick: members only.
-            if role == "member":
-                recent = valid_races[:kick_weeks]
-
-                if (
-                    len(recent) == kick_weeks
-                    and all(week in fame for week in recent)
-                    and sum(fame[w] for w in recent)
-                    < kick_rules["below_total_fame"]
-                ):
-                    kick_list.append(
-                        (name, role, *(fame[w] for w in recent))
-                    )
-
-    # Display historical data for members on the kick list.
-    print("\nFull war history of members in kick list:")
-
-    for item in kick_list:
-        name = item[0]
-        # Match the original result to the member by name.
-        for tag, player in clan_log.items():
-            if tag != "ranks" and player["name"] == name:
-                print(f"{name} ({tag}): {player['fame']}")
+    # Use only clan standings corresponding to the evaluated war IDs.
+    war_ids = {war.identifier for war in wars}
+    ranks = []
+    for item in riverracelog.get("items", []):
+        try:
+            identifier = f"{int(item['seasonId'])}:{int(item['sectionIndex'])}"
+        except (KeyError, TypeError, ValueError):
+            continue
+        if identifier not in war_ids:
+            continue
+        for standing in item.get("standings", []):
+            if standing.get("clan", {}).get("tag") == clan_tag:
+                rank = standing.get("rank")
+                if type(rank) is int and rank > 0:
+                    ranks.append(rank)
                 break
+    print(f"\nAverage war rank: {statistics.mean(ranks):.2f}" if ranks else "\nAverage war rank: No data")
 
-    # Save calculated history.
-    with (LOG_DIR / "clan-log.json").open(
-        "w", encoding="utf-8"
-    ) as outfile:
-        json.dump(clan_log, outfile, indent=2)
+    if wars:
+        latest = wars[0]
+        scores = [
+            (tag, record["fame"])
+            for tag, record in latest.participants.items()
+            if tag in evaluations and type(record.get("fame")) is int
+        ]
+        if scores:
+            highest = max(score for _, score in scores)
+            winners = [tag for tag, score in scores if score == highest]
+            print(f"Latest war: {latest.identifier}")
+            print("Weekly war champion(s): " + ", ".join(
+                f"{evaluations[tag]['name']} ({highest} fame)" for tag in winners
+            ))
+        else:
+            print("Weekly war champion: No eligible player with fame data")
+    else:
+        print("Weekly war champion: No valid war history")
 
-    return (
-        week_champ,
-        promotion_list,
-        demotion_list,
-        kick_list,
-        warning_list
-    )
+    print("\nRecommendations (advisory only):")
+    for action in ("promotion", "demotion", "kick", "warning"):
+        qualified = [(tag, player) for tag, player in evaluations.items()
+                     if player["recommendations"][action] is True]
+        unknown = [(tag, player) for tag, player in evaluations.items()
+                   if player["recommendations"][action] is None]
+        print(f"\n{action.capitalize()} ({len(qualified)}):")
+        if not qualified:
+            print("  None")
+        for tag, player in qualified:
+            print(f"  {player['name']} ({tag}, {player['role']})")
+        if unknown:
+            print(f"  Insufficient data: {', '.join(player['name'] for _, player in unknown)}")
 
-    
+    # Useful for manual review, using unique tags rather than names.
+    print("\nWar history for players recommended for kick:")
+    kick_tags = [tag for tag, player in evaluations.items()
+                 if player["recommendations"]["kick"] is True]
+    for tag in kick_tags:
+        print(f"  {evaluations[tag]['name']} ({tag}): " + ", ".join(
+            f"{war.identifier}={war.participants[tag].get('fame', '?')}"
+            for war in wars if tag in war.participants
+        ))
 
-try:
-    with CONFIG_FILE.open("r", encoding="utf-8") as infile:
-        config = json.load(infile)
-        # Load rules
-        rules = config["rules"]
+    clan_log = {
+        "wars": [war.identifier for war in wars],
+        "players": {tag: {
+            "name": player["name"],
+            "role": player["role"],
+            "recommendations": player["recommendations"],
+            "history": {
+                war.identifier: {
+                    "fame": war.participants[tag].get("fame"),
+                    "decksUsed": war.participants[tag].get("decksUsed"),
+                }
+                for war in wars if tag in war.participants
+            },
+        } for tag, player in evaluations.items()},
+    }
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with (LOG_DIR / "clan-log.json").open("w", encoding="utf-8") as outfile:
+        json.dump(clan_log, outfile, indent=2, ensure_ascii=False)
 
-        for action in ("promotion", "demotion", "kick"):
-            weeks = rules[action]["consecutive_weeks"]
 
-            if type(weeks) is not int or weeks < 1:
-                raise SystemExit(
-                    f"Invalid consecutive_weeks for {action}: {weeks}"
-                )
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Analyze Clash Royale clan war history")
+    parser.add_argument("--cached", action="store_true", help="Use existing logs/*.json; do not call the API")
+    args = parser.parse_args()
+    clan_tag, token, rules = load_config()
+    try:
+        members, riverracelog = load_data(clan_tag, token, args.cached)
+        report(members, riverracelog, clan_tag, rules)
+    except (RuntimeError, OSError, RuleConfigurationError, KeyError, TypeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
-        thresholds = {
-            "promotion": "minimum_fame_per_week",
-            "demotion": "below_fame_per_week",
-            "warning": "below_fame",
-            "kick": "below_total_fame",
-        }
 
-        for action, field in thresholds.items():
-            value = rules[action][field]
-
-            if type(value) is not int or value < 0:
-                raise SystemExit(
-                    f"Invalid {action}.{field}: {value}"
-                )
-
-except FileNotFoundError:
-    raise SystemExit(
-        "Configuration file not found. "
-        "Copy config.example.json to config.json "
-        "and enter your clan tag and API token."
-    )
-except json.JSONDecodeError as exc:
-    raise SystemExit(f"Invalid JSON in config.json: {exc}")
-
-clan_tag = config.get("clan_tag", "").strip()
-token = config.get("api_token", "").strip()
-
-if not clan_tag.startswith("#") or len(clan_tag) < 2:
-    raise SystemExit("Invalid clan tag in config.json.")
-
-# set to True to compute the output from the local files 
-data_fetched = True
-
-week_champ, promotion_list, demotion_list, kick_list, warning_list = (
-    ClashRoyaleClanManager(clan_tag, token, data_fetched, rules)
-)
-
-print(f"Week champ: {week_champ} \nPromote: {promotion_list} \nDemote: {demotion_list} \nKick: {kick_list} \nwarning list: {warning_list}")
+if __name__ == "__main__":
+    sys.exit(main())

@@ -3,19 +3,53 @@
     "api_token": "YOUR_API_TOKEN",
     "rules": {
         "promotion": {
-            "minimum_fame_per_week": 1600,
-            "consecutive_weeks": 2
+            "enabled": true,
+            "strategy": "participation",
+            "roles": ["member"],
+            "participation": {
+                "consecutive_wars": 10
+            },
+            "fame": {
+                "minimum_fame_per_week": 1600,
+                "consecutive_wars": 2
+            }
         },
+
         "demotion": {
-            "below_fame_per_week": 1600,
-            "consecutive_weeks": 2
+            "enabled": true,
+            "strategy": "participation",
+            "roles": ["elder"],
+            "participation": {
+                "consecutive_missed_wars": 2
+            },
+            "fame": {
+                "below_fame_per_week": 1600,
+                "consecutive_wars": 2
+            }
         },
-        "warning": {
-            "below_fame": 1200
-        },
+
         "kick": {
-            "below_total_fame": 2800,
-            "consecutive_weeks": 2
+            "enabled": true,
+            "strategy": "combined",
+            "roles": ["member"],
+            "operator": "OR",
+            "participation": {
+                "consecutive_missed_wars": 1
+            },
+            "fame": {
+                "minimum_total_fame": 600,
+                "last_wars": 1
+            }
+        },
+
+        "warning": {
+            "enabled": false,
+            "strategy": "fame",
+            "roles": ["member"],
+            "fame": {
+                "below_fame": 1200,
+                "last_wars": 1
+            }
         }
     }
 }
