@@ -59,6 +59,29 @@ Feel free to update the rules according to your preferences!
    python ClashRoyaleClanManager.py
    ```
 
+## Configuration
+
+Before running the application, create a local configuration file from the provided template:
+
+```bash
+cp config.example.json config.json
+```
+
+Edit `config.json` and enter your Clash Royale clan tag and API token:
+
+```json
+{
+    "clan_tag": "#YOUR_CLAN_TAG",
+    "api_token": "YOUR_API_TOKEN"
+}
+```
+
+You can obtain an API token from the [Supercell Developer Portal](https://developer.clashroyale.com/).
+
+The application automatically reads the configuration file at startup. No interactive input is required.
+
+**Security:** The `config.json` file contains your private API token and is excluded from Git through `.gitignore`. Never commit or share this file. Only `config.example.json`, containing placeholder values, should be committed.
+
 ## Generated Data
 
 The script automatically creates a `logs/` directory to store downloaded Clash Royale API data, including `members.json` and `riverracelog.json`.

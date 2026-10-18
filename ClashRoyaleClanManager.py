@@ -13,6 +13,9 @@ BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+# Load configuration
+CONFIG_FILE = BASE_DIR / "config.json"
+
 
 def data_fetcher(clan_tag, token, category):
     # fetches data from API for a given category
@@ -149,12 +152,23 @@ def ClashRoyaleClanManager(clan_tag, token, data_fetched):
     return week_champ, promotion_list, demotion_list, kick_list, warning_list
     
 
-## customizations: edit only this part of the code to adapt it to your clan
+try:
+    with CONFIG_FILE.open("r", encoding="utf-8") as infile:
+        config = json.load(infile)
+except FileNotFoundError:
+    raise SystemExit(
+        "Configuration file not found. "
+        "Copy config.example.json to config.json "
+        "and enter your clan tag and API token."
+    )
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"Invalid JSON in config.json: {exc}")
 
-clan_tag = input("insert clan tag (starting with #): ")
+clan_tag = config.get("clan_tag", "").strip()
+token = config.get("api_token", "").strip()
 
-# key created via supercell's CR api
-token = input("insert token from Supercell's Clash Royale API: ")
+if not clan_tag.startswith("#") or len(clan_tag) < 2:
+    raise SystemExit("Invalid clan tag in config.json.")
 
 # set to True to compute the output from the local files 
 data_fetched = False
