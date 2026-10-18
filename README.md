@@ -21,6 +21,26 @@ Computes:
 
 Decisions on clan updates can be made according to the four lists. The script also prints a full war history for all members in the kick list.
 
+## Clan Management Rules
+
+Promotion, demotion, warning, and kick recommendations are controlled through the `rules` section of `config.json`.
+
+| Rule | Default | Description |
+|---|---|---|
+| Promotion | 1,600 fame per week, 2 consecutive weeks | Recommend promoting a member to elder |
+| Demotion | Below 1,600 fame per week, 2 consecutive weeks | Recommend demoting an elder |
+| Warning | Below 1,200 fame in the latest war | Recommend warning a player |
+| Kick | Below 2,800 total fame across 2 consecutive weeks | Recommend removing a member |
+
+Thresholds and the number of consecutive weeks can be adjusted independently.
+
+**Insufficient data:** Recommendations requiring multiple weeks are generated only when all required war records are available for the player. Missing participation records are not automatically treated as zero fame.
+
+These recommendations are informational only. The script does not automatically change clan membership or roles.
+
+The application evaluates completed war history returned by the Clash Royale API and does not independently verify whether a participant deliberately skipped an attack.
+
+
 Feel free to update the rules according to your preferences!
 
 ## Requirements

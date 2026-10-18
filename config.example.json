@@ -1,4 +1,21 @@
 {
     "clan_tag": "#YOUR_CLAN_TAG",
-    "api_token": "YOUR_API_TOKEN"
+    "api_token": "YOUR_API_TOKEN",
+    "rules": {
+        "promotion": {
+            "minimum_fame_per_week": 1600,
+            "consecutive_weeks": 2
+        },
+        "demotion": {
+            "below_fame_per_week": 1600,
+            "consecutive_weeks": 2
+        },
+        "warning": {
+            "below_fame": 1200
+        },
+        "kick": {
+            "below_total_fame": 2800,
+            "consecutive_weeks": 2
+        }
+    }
 }
