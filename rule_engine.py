@@ -3,6 +3,7 @@
 No network access or file I/O. A missing per-player war record is UNKNOWN, not
 non-participation. Wars must be complete and sorted by season/section descending.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,7 +38,11 @@ def build_wars(riverracelog: Mapping[str, Any], clan_tag: str) -> list[War]:
         except (KeyError, TypeError, ValueError):
             continue
         standing = next(
-            (s for s in item.get("standings", []) if s.get("clan", {}).get("tag") == clan_tag),
+            (
+                s
+                for s in item.get("standings", [])
+                if s.get("clan", {}).get("tag") == clan_tag
+            ),
             None,
         )
         if standing is None:
@@ -72,27 +77,46 @@ def validate_rules(rules: Mapping[str, Any]) -> None:
         strategy = rule.get("strategy")
         if strategy not in ("fame", "participation", "combined"):
             raise RuleConfigurationError(f"Invalid {action} strategy: {strategy}")
-        if not isinstance(rule.get("roles"), list) or not all(isinstance(x, str) for x in rule["roles"]):
-            raise RuleConfigurationError(f"rules.{action}.roles must be a list of role strings")
+        if not isinstance(rule.get("roles"), list) or not all(
+            isinstance(x, str) for x in rule["roles"]
+        ):
+            raise RuleConfigurationError(
+                f"rules.{action}.roles must be a list of role strings"
+            )
         if strategy == "combined" and rule.get("operator") not in ("AND", "OR"):
             raise RuleConfigurationError(f"rules.{action}.operator must be AND or OR")
         if strategy in ("fame", "combined"):
             f = rule.get("fame", {})
             if action == "promotion":
-                _nonnegative_int(f.get("minimum_fame_per_week"), f"{action}.fame.minimum_fame_per_week")
-                _positive_int(f.get("consecutive_wars"), f"{action}.fame.consecutive_wars")
+                _nonnegative_int(
+                    f.get("minimum_fame_per_week"),
+                    f"{action}.fame.minimum_fame_per_week",
+                )
+                _positive_int(
+                    f.get("consecutive_wars"), f"{action}.fame.consecutive_wars"
+                )
             elif action == "demotion":
-                _nonnegative_int(f.get("below_fame_per_week"), f"{action}.fame.below_fame_per_week")
-                _positive_int(f.get("consecutive_wars"), f"{action}.fame.consecutive_wars")
+                _nonnegative_int(
+                    f.get("below_fame_per_week"), f"{action}.fame.below_fame_per_week"
+                )
+                _positive_int(
+                    f.get("consecutive_wars"), f"{action}.fame.consecutive_wars"
+                )
             elif action == "kick":
-                _nonnegative_int(f.get("minimum_total_fame"), f"{action}.fame.minimum_total_fame")
+                _nonnegative_int(
+                    f.get("minimum_total_fame"), f"{action}.fame.minimum_total_fame"
+                )
                 _positive_int(f.get("last_wars"), f"{action}.fame.last_wars")
             else:
                 _nonnegative_int(f.get("below_fame"), f"{action}.fame.below_fame")
                 _positive_int(f.get("last_wars"), f"{action}.fame.last_wars")
         if strategy in ("participation", "combined"):
             p = rule.get("participation", {})
-            key = "consecutive_wars" if action == "promotion" else "consecutive_missed_wars"
+            key = (
+                "consecutive_wars"
+                if action == "promotion"
+                else "consecutive_missed_wars"
+            )
             _positive_int(p.get(key), f"{action}.participation.{key}")
 
 
@@ -120,10 +144,16 @@ def _fame(record: Mapping[str, Any]) -> int | None:
     return value
 
 
-def _strategy_check(action: str, kind: str, tag: str, wars: Sequence[War], rule: Mapping[str, Any]) -> bool | None:
+def _strategy_check(
+    action: str, kind: str, tag: str, wars: Sequence[War], rule: Mapping[str, Any]
+) -> bool | None:
     if kind == "participation":
         opts = rule["participation"]
-        count = opts["consecutive_wars"] if action == "promotion" else opts["consecutive_missed_wars"]
+        count = (
+            opts["consecutive_wars"]
+            if action == "promotion"
+            else opts["consecutive_missed_wars"]
+        )
         recs = _records(wars, tag, count)
         if recs is None:
             return None
@@ -133,7 +163,11 @@ def _strategy_check(action: str, kind: str, tag: str, wars: Sequence[War], rule:
         return _all_known(values, False)
 
     opts = rule["fame"]
-    count = opts["consecutive_wars"] if action in ("promotion", "demotion") else opts["last_wars"]
+    count = (
+        opts["consecutive_wars"]
+        if action in ("promotion", "demotion")
+        else opts["last_wars"]
+    )
     recs = _records(wars, tag, count)
     if recs is None:
         return None
@@ -146,7 +180,9 @@ def _strategy_check(action: str, kind: str, tag: str, wars: Sequence[War], rule:
         return all(value < opts["below_fame_per_week"] for value in values)
     if action == "kick":
         return sum(values) < opts["minimum_total_fame"]
-    return sum(values) < opts["below_fame"]  # If last_wars > 1, threshold applies to total.
+    return (
+        sum(values) < opts["below_fame"]
+    )  # If last_wars > 1, threshold applies to total.
 
 
 def _all_known(values: Sequence[bool | None], target: bool) -> bool | None:
@@ -160,11 +196,21 @@ def _all_known(values: Sequence[bool | None], target: bool) -> bool | None:
 
 def _combine(left: bool | None, right: bool | None, operator: str) -> bool | None:
     if operator == "OR":
-        return True if left is True or right is True else (None if None in (left, right) else False)
-    return False if left is False or right is False else (None if None in (left, right) else True)
+        return (
+            True
+            if left is True or right is True
+            else (None if None in (left, right) else False)
+        )
+    return (
+        False
+        if left is False or right is False
+        else (None if None in (left, right) else True)
+    )
 
 
-def evaluate_member(tag: str, role: str, wars: Sequence[War], rules: Mapping[str, Any]) -> dict[str, bool | None]:
+def evaluate_member(
+    tag: str, role: str, wars: Sequence[War], rules: Mapping[str, Any]
+) -> dict[str, bool | None]:
     """True=recommend, False=no action, None=insufficient evidence."""
     output: dict[str, bool | None] = {}
     for action in ("promotion", "demotion", "kick", "warning"):
@@ -186,7 +232,12 @@ def evaluate_member(tag: str, role: str, wars: Sequence[War], rules: Mapping[str
     return output
 
 
-def evaluate_clan(members: Mapping[str, Any], riverracelog: Mapping[str, Any], clan_tag: str, rules: Mapping[str, Any]):
+def evaluate_clan(
+    members: Mapping[str, Any],
+    riverracelog: Mapping[str, Any],
+    clan_tag: str,
+    rules: Mapping[str, Any],
+):
     validate_rules(rules)
     wars = build_wars(riverracelog, clan_tag)
     results = {}
@@ -197,6 +248,8 @@ def evaluate_clan(members: Mapping[str, Any], riverracelog: Mapping[str, Any], c
         results[tag] = {
             "name": member.get("name", tag),
             "role": member.get("role", "unknown"),
-            "recommendations": evaluate_member(tag, member.get("role", "unknown"), wars, rules),
+            "recommendations": evaluate_member(
+                tag, member.get("role", "unknown"), wars, rules
+            ),
         }
     return wars, results

@@ -1,0 +1,5 @@
+-r requirements.txt
+
+black>=25,<27
+isort>=6,<8
+pre-commit>=4,<5
