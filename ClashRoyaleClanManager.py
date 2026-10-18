@@ -6,6 +6,14 @@ import json
 import requests
 import statistics
 
+from pathlib import Path
+
+# Create logs directory if it does not exist
+BASE_DIR = Path(__file__).resolve().parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
 def data_fetcher(clan_tag, token, category):
     # fetches data from API for a given category
     # categories: currentriverrace, riverracelog, warlog, members, members?limit=50, empty input for clan info etc
@@ -25,23 +33,28 @@ def data_fetcher(clan_tag, token, category):
 def ClashRoyaleClanManager(clan_tag, token, data_fetched):
     # computes promotion/demotion/kick/warning lists, average war rank, and weekly war champ
     
+    # Create logs directory if it does not exist
+    BASE_DIR = Path(__file__).resolve().parent
+    LOG_DIR = BASE_DIR / "logs"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
     # fetch and log data
     if data_fetched:
-        with open('logs/members.json', 'r') as outfile:
+        with (LOG_DIR / "members.json").open("r", encoding="utf-8") as outfile:
             members = json.load(outfile)  
-            
-        with open('logs/riverracelog.json', 'r') as outfile:
+        
+        with (LOG_DIR / "riverracelog.json").open("r", encoding="utf-8") as outfile:            
             riverracelog = json.load(outfile)  
         
     else:
         print('Fetching members data...')
-        members = data_fetcher(clan_tag, token, 'members') 
-        with open('logs/members.json', 'w') as outfile:
+        members = data_fetcher(clan_tag, token, 'members')
+        with (LOG_DIR / "members.json").open("w", encoding="utf-8") as outfile:
             json.dump(members, outfile)  
 
         print('Fetching riverracelog data...')
-        riverracelog = data_fetcher(clan_tag, token, 'riverracelog') 
-        with open('logs/riverracelog.json', 'w') as outfile:
+        riverracelog = data_fetcher(clan_tag, token, 'riverracelog')
+        with (LOG_DIR / "riverracelog.json").open("w", encoding="utf-8") as outfile:
             json.dump(riverracelog, outfile)  
     
     race_indices = [f"{war_week['seasonId']}:{war_week['sectionIndex']}" for war_week in riverracelog['items']]    
@@ -130,7 +143,7 @@ def ClashRoyaleClanManager(clan_tag, token, data_fetched):
         print(f"{name}: {clan_log[name_to_tag[name]]['fame']}")      
     print("\n")
     
-    with open("logs/clan-log.json", "w") as outfile:
+    with (LOG_DIR / "clan-log.json").open("w", encoding="utf-8") as outfile:
         json.dump(clan_log, outfile)
     
     return week_champ, promotion_list, demotion_list, kick_list, warning_list

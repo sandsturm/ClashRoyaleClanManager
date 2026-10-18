@@ -1,5 +1,7 @@
 # Clash Royale Clan Manager
 
+## Overview
+
 A short script that computes statistics based on Clan Wars II weekly performance for a clan in Clash Royale.
 
 Requires:
@@ -20,3 +22,47 @@ Computes:
 Decisions on clan updates can be made according to the four lists. The script also prints a full war history for all members in the kick list.
 
 Feel free to update the rules according to your preferences!
+
+## Requirements
+
+- Python 3.10 or newer
+- A Clash Royale API token from [Supercell Developer Portal](https://developer.clashroyale.com/)
+- Python dependencies listed in `requirements.txt`
+
+## Installation
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/sandsturm/ClashRoyaleClanManager.git
+   cd ClashRoyaleClanManager
+   ```
+
+2. Create and activate a Python virtual environment (recommended):
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+
+3. Install the required dependencies:
+
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+4. Configure the Clash Royale API token and clan tag as described in the configuration instructions.
+
+5. Run the script:
+
+   ```bash
+   python ClashRoyaleClanManager.py
+   ```
+
+## Generated Data
+
+The script automatically creates a `logs/` directory to store downloaded Clash Royale API data, including `members.json` and `riverracelog.json`.
+
+The entire `logs/` directory is excluded from Git through `.gitignore`. Its contents are stored locally and are not committed to the repository.
+
+When using cached data, the corresponding JSON files must already exist.
