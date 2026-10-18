@@ -134,8 +134,8 @@ Live race reporting also prints each current member's fame and decks used. For e
 ```text
 Current river race (live snapshot; warDay):
   Used for kick evaluations only; promotions/demotions use completed wars.
-  axuerky (#LYGJVJY0C): 2250 fame, 15 decks used
-  illyrian (#Y8PGUL2PJ): 0 fame, 0 decks used
+  player1 (#LLLLLL10C): 2250 fame, 15 decks used
+  illyrian (#Y8PLCIJ"J): 0 fame, 0 decks used
 ```
 
 *Illustrative values.* If a current player has no participant record, that player's activity is classified as unknown rather than assumed to be zero.
