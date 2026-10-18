@@ -255,6 +255,50 @@ def evaluate_clan(
     return wars, results
 
 
+def apply_live_kick_rules(
+    evaluations: dict[str, dict[str, Any]],
+    current_race: Mapping[str, Any],
+    clan_tag: str,
+    rules: Mapping[str, Any],
+) -> bool:
+    """Update kick recommendations using current warDay observations.
+
+    Only kick uses live data. Every other recommendation stays based on
+    completed races. Missing participant records remain unknown.
+    Returns whether an active war was used for kick evaluation.
+    """
+    validate_rules(rules)
+    if current_race.get("periodType") != "warDay":
+        return False
+    clan = current_race.get("clan", {})
+    if clan.get("tag") != clan_tag:
+        raise ValueError("Current river race clan tag does not match configuration")
+    participants = {
+        p["tag"]: p
+        for p in clan.get("participants", [])
+        if isinstance(p, dict) and isinstance(p.get("tag"), str)
+    }
+    # An active war is the relevant observation for the latest-war kick rule.
+    # Keep promotions/demotions based on completed history.
+    live_wars = [War(0, 0, participants)]
+    kick_rule = rules["kick"]
+    for tag, player in evaluations.items():
+        if not kick_rule["enabled"] or player["role"] not in kick_rule["roles"]:
+            continue
+        strategy = kick_rule["strategy"]
+        if strategy == "combined":
+            part = _strategy_check("kick", "participation", tag, live_wars, kick_rule)
+            fame = _strategy_check("kick", "fame", tag, live_wars, kick_rule)
+            result = _combine(part, fame, kick_rule["operator"])
+        else:
+            result = _strategy_check("kick", strategy, tag, live_wars, kick_rule)
+        player["recommendations"]["kick"] = result
+        if result is True:
+            player["recommendations"]["promotion"] = False
+            player["recommendations"]["warning"] = False
+    return True
+
+
 def donation_summary(
     members: Mapping[str, Any],
     history: Sequence[Mapping[str, Any]] = (),
