@@ -11,13 +11,14 @@ import argparse
 import json
 import statistics
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import requests
 
-from rule_engine import RuleConfigurationError, evaluate_clan
+from rule_engine import RuleConfigurationError, donation_summary, evaluate_clan
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
@@ -25,7 +26,7 @@ CONFIG_FILE = BASE_DIR / "config.json"
 API_BASE_URL = "https://api.clashroyale.com/v1"
 
 
-def load_config() -> tuple[str, str, dict[str, Any]]:
+def load_config() -> tuple[str, str, dict[str, Any], dict[str, Any]]:
     try:
         with CONFIG_FILE.open("r", encoding="utf-8") as infile:
             config = json.load(infile)
@@ -51,7 +52,21 @@ def load_config() -> tuple[str, str, dict[str, Any]]:
     rules = config.get("rules")
     if not isinstance(rules, dict):
         raise SystemExit("config.json requires a rules object.")
-    return clan_tag.strip(), token.strip(), rules
+    donations = config.get(
+        "donations", {"enabled": False, "tracking": {"enabled": False}}
+    )
+    if (
+        not isinstance(donations, dict)
+        or type(donations.get("enabled", False)) is not bool
+    ):
+        raise SystemExit("config.json donations.enabled must be boolean.")
+    tracking = donations.get("tracking", {})
+    if (
+        not isinstance(tracking, dict)
+        or type(tracking.get("enabled", False)) is not bool
+    ):
+        raise SystemExit("config.json donations.tracking.enabled must be boolean.")
+    return clan_tag.strip(), token.strip(), rules, donations
 
 
 def fetch_data(clan_tag: str, token: str, endpoint: str) -> dict[str, Any]:
@@ -99,11 +114,48 @@ def load_data(
     return results[0], results[1]
 
 
+def update_donation_history(
+    members: dict[str, Any], fresh_data: bool
+) -> list[dict[str, Any]]:
+    """Persist fresh donation snapshots; cached runs never manufacture new data."""
+    path = LOG_DIR / "donations-history.json"
+    if path.exists():
+        with path.open("r", encoding="utf-8") as infile:
+            history = json.load(infile)
+        if not isinstance(history, list):
+            raise RuntimeError("Donation history must contain a JSON list")
+    else:
+        history = []
+    if not fresh_data:
+        return history
+
+    snapshot = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "players": {
+            m["tag"]: {
+                "name": m.get("name", m["tag"]),
+                "donations": m.get("donations"),
+                "donationsReceived": m.get("donationsReceived"),
+            }
+            for m in members.get("items", [])
+            if isinstance(m, dict) and m.get("tag")
+        },
+    }
+    history.append(snapshot)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    with temporary.open("w", encoding="utf-8") as outfile:
+        json.dump(history, outfile, ensure_ascii=False, indent=2)
+    temporary.replace(path)
+    return history
+
+
 def report(
     members: dict[str, Any],
     riverracelog: dict[str, Any],
     clan_tag: str,
     rules: dict[str, Any],
+    donation_history: list[dict[str, Any]] | None = None,
 ) -> None:
     wars, evaluations = evaluate_clan(members, riverracelog, clan_tag, rules)
 
@@ -173,6 +225,20 @@ def report(
                 f"  Insufficient data: {', '.join(player['name'] for _, player in unknown)}"
             )
 
+    if donation_history is not None:
+        donation_data = donation_summary(members, donation_history)
+        print("\nDonations (current API counters; not disciplinary criteria):")
+        ranked = sorted(
+            donation_data.items(),
+            key=lambda row: (row[1]["donations"] is None, -(row[1]["donations"] or 0)),
+        )
+        for tag, item in ranked:
+            donated = "unknown" if item["donations"] is None else str(item["donations"])
+            print(
+                f"  {item['name']} ({tag}): {donated} donated; "
+                f"{item['observations']} snapshot(s)"
+            )
+
     # Useful for manual review, using unique tags rather than names.
     print("\nWar history for players recommended for kick:")
     kick_tags = [
@@ -224,10 +290,19 @@ def main() -> int:
         help="Use existing logs/*.json; do not call the API",
     )
     args = parser.parse_args()
-    clan_tag, token, rules = load_config()
+    clan_tag, token, rules, donations = load_config()
     try:
         members, riverracelog = load_data(clan_tag, token, args.cached)
-        report(members, riverracelog, clan_tag, rules)
+        history = None
+        if donations.get("enabled", False):
+            history = update_donation_history(
+                members,
+                fresh_data=(
+                    not args.cached
+                    and donations.get("tracking", {}).get("enabled", False)
+                ),
+            )
+        report(members, riverracelog, clan_tag, rules, history)
     except (RuntimeError, OSError, RuleConfigurationError, KeyError, TypeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

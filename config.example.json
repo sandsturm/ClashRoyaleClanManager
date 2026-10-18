@@ -50,6 +50,20 @@
                 "below_fame": 1200,
                 "last_wars": 1
             }
+        },
+
+        "donations": {
+            "enabled": true,
+            "tracking": {
+                "enabled": true
+            },
+            "evaluation": {
+                "enabled": false,
+                "co_leader": {
+                    "minimum_average_weekly_donations": 200,
+                    "minimum_weeks_observed": 8
+                }
+            }
         }
     }
 }

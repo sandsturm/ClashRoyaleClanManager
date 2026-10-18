@@ -1,7 +1,7 @@
 """Configurable, conservative Clash Royale clan-war recommendation engine.
 
 No network access or file I/O. A missing per-player war record is UNKNOWN, not
-non-participation. Wars must be complete and sorted by season/section descending.
+non-participation. Donation statistics are advisory and never affect war rules.
 """
 
 from __future__ import annotations
@@ -253,3 +253,52 @@ def evaluate_clan(
             ),
         }
     return wars, results
+
+
+def donation_summary(
+    members: Mapping[str, Any],
+    history: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, dict[str, Any]]:
+    """Report donation observations without making disciplinary recommendations.
+
+    Historical samples must be captured on fresh API calls, never replayed from
+    cached responses. A decreasing counter flags a reset (or counter anomaly);
+    it does not imply negative donations or a known full-week total.
+    """
+    samples_by_tag: dict[str, list[tuple[str, int]]] = {}
+    for snapshot in history:
+        timestamp = snapshot.get("timestamp")
+        players = snapshot.get("players")
+        if not isinstance(timestamp, str) or not isinstance(players, dict):
+            continue
+        for tag, data in players.items():
+            if not isinstance(data, dict):
+                continue
+            amount = data.get("donations")
+            if isinstance(tag, str) and type(amount) is int and amount >= 0:
+                samples_by_tag.setdefault(tag, []).append((timestamp, amount))
+
+    results: dict[str, dict[str, Any]] = {}
+    for member in members.get("items", []):
+        if not isinstance(member, dict) or not member.get("tag"):
+            continue
+        tag = member["tag"]
+        current = member.get("donations")
+        received = member.get("donationsReceived")
+        if type(current) is not int or current < 0:
+            current = None
+        if type(received) is not int or received < 0:
+            received = None
+        samples = sorted(samples_by_tag.get(tag, []), key=lambda pair: pair[0])
+        resets = sum(b < a for (_, a), (_, b) in zip(samples, samples[1:]))
+        results[tag] = {
+            "name": member.get("name", tag),
+            "donations": current,
+            "donations_received": received,
+            "observations": len(samples),
+            "observed_resets": resets,
+            "first_observed": samples[0][0] if samples else None,
+            "last_observed": samples[-1][0] if samples else None,
+            "highest_observed_counter": max((n for _, n in samples), default=None),
+        }
+    return results

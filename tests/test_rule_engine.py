@@ -1,6 +1,12 @@
 import unittest
 
-from rule_engine import War, build_wars, evaluate_clan, evaluate_member
+from rule_engine import (
+    War,
+    build_wars,
+    donation_summary,
+    evaluate_clan,
+    evaluate_member,
+)
 
 RULES = {
     "promotion": {
@@ -96,6 +102,54 @@ class RuleEngineTests(unittest.TestCase):
             ]
         }
         self.assertEqual(build_wars(log, "#CLAN")[0].identifier, "10:1")
+
+    def test_donations_do_not_affect_war_recommendations(self):
+        member = {
+            "items": [{"tag": "#A", "name": "A", "role": "member", "donations": 4000}]
+        }
+        data = {
+            "items": [
+                {
+                    "seasonId": 10,
+                    "sectionIndex": 1,
+                    "standings": [
+                        {
+                            "clan": {
+                                "tag": "#CLAN",
+                                "participants": [
+                                    {"tag": "#A", "fame": 500, "decksUsed": 1}
+                                ],
+                            }
+                        }
+                    ],
+                }
+            ]
+        }
+        _, results = evaluate_clan(member, data, "#CLAN", RULES)
+        self.assertTrue(results["#A"]["recommendations"]["kick"])
+        self.assertEqual(donation_summary(member)["#A"]["donations"], 4000)
+
+    def test_donation_history_resets_are_not_negative(self):
+        members = {"items": [{"tag": "#A", "donations": 5, "donationsReceived": 12}]}
+        history = [
+            {
+                "timestamp": "2026-10-01T10:00:00+00:00",
+                "players": {"#A": {"donations": 4000}},
+            },
+            {
+                "timestamp": "2026-10-08T10:00:00+00:00",
+                "players": {"#A": {"donations": 5}},
+            },
+        ]
+        result = donation_summary(members, history)["#A"]
+        self.assertEqual(result["observed_resets"], 1)
+        self.assertEqual(result["highest_observed_counter"], 4000)
+        self.assertEqual(result["donations_received"], 12)
+
+    def test_missing_donations_unknown(self):
+        result = donation_summary({"items": [{"tag": "#A"}]})["#A"]
+        self.assertIsNone(result["donations"])
+        self.assertEqual(result["observations"], 0)
 
     def test_all_empty(self):
         wars, members = evaluate_clan({"items": []}, {"items": []}, "#CLAN", RULES)
